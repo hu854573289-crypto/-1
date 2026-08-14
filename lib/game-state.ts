@@ -1,12 +1,14 @@
-import { ENEMIES, ITEM_NAMES, REALMS, RARITY_META } from "./game-data";
+import { COMPANION_POOL, ENEMIES, ITEM_NAMES, REALMS, RARITY_META } from "./game-data";
 import {
   GAME_SCHEMA_VERSION,
   type BattleResult,
+  type CompanionState,
   type EquipmentItem,
   type GameState,
   type GearSlot,
   type QuestState,
   type Rarity,
+  type SummonResult,
 } from "./game-types";
 
 const slots: GearSlot[] = ["weapon", "armor", "ring", "charm"];
@@ -36,6 +38,13 @@ export function createDefaultGameState(now: number, name = "云游者"): GameSta
     locked: true,
   };
 
+  const starterTeam: CompanionState[] = COMPANION_POOL.slice(0, 4).map((member) => ({
+    ...member,
+    level: 1,
+    stars: 1,
+    shards: 0,
+  }));
+
   const state: GameState = {
     schemaVersion: GAME_SCHEMA_VERSION,
     profile: {
@@ -47,7 +56,7 @@ export function createDefaultGameState(now: number, name = "云游者"): GameSta
       realmName: REALMS[0],
       power: 0,
     },
-    currencies: { gold: 1280, jade: 80, essence: 45, keys: 3 },
+    currencies: { gold: 1280, jade: 120, essence: 45, keys: 10 },
     hero: {
       baseAttack: 96,
       baseHealth: 920,
@@ -64,11 +73,14 @@ export function createDefaultGameState(now: number, name = "云游者"): GameSta
       equipped: { weapon: starterWeapon.id, armor: starterArmor.id, ring: null, charm: null },
       inventory: [starterWeapon, starterArmor],
     },
+    team: { activeIds: starterTeam.map((member) => member.id), roster: starterTeam },
+    summon: { pity: 0, totalPulls: 0, lastFreeDay: "", history: [] },
+    bag: { forgeStones: 6, petFood: 3, skillScrolls: 2 },
     progress: { stage: 1, bestStage: 1, unlockedZone: 1, autoChallenge: true, battleSpeed: 1 },
     idle: { lastClaimAt: now, lastSeenAt: now, maxHours: 12 },
     quests: defaultQuests(),
     daily: { dayKey: dayKey(now), loginClaimed: false, streak: 1 },
-    statistics: { wins: 0, defeats: 0, monstersDefeated: 0, goldEarned: 0, idleSecondsClaimed: 0 },
+    statistics: { wins: 0, defeats: 0, monstersDefeated: 0, goldEarned: 0, idleSecondsClaimed: 0, summons: 0 },
     settings: { music: false, haptics: true, lowMotion: false },
     lastSavedAt: now,
   };
@@ -102,7 +114,16 @@ export function calculatePower(state: GameState) {
     .reduce((sum, item) => sum + item.power, 0);
   const skillPower = state.hero.skills.reduce((sum, skill) => sum + skill.level * 72, 0);
   const statPower = state.hero.baseAttack * 4.1 + state.hero.baseDefense * 2.8 + state.hero.baseHealth * 0.25;
-  return Math.max(1, Math.floor((statPower + gearPower + skillPower) * (1 + state.profile.realm * 0.16)));
+  const teamPower = state.team.activeIds
+    .map((id) => state.team.roster.find((member) => member.id === id))
+    .filter((member): member is CompanionState => Boolean(member))
+    .reduce((sum, member) => sum + companionPower(member), 0);
+  return Math.max(1, Math.floor((statPower + gearPower + skillPower + teamPower) * (1 + state.profile.realm * 0.16)));
+}
+
+export function companionPower(member: CompanionState) {
+  const rarity = RARITY_META[member.rarity].multiplier;
+  return Math.floor(member.basePower * rarity * (1 + (member.level - 1) * 0.075) * (1 + (member.stars - 1) * 0.22));
 }
 
 export function recalculatePower(state: GameState): GameState {
@@ -125,6 +146,7 @@ export function applyHeroUpgrade(state: GameState): GameState {
   next.hero.baseHealth += 105 + next.profile.level * 6;
   next.hero.baseDefense += 5;
   if (next.profile.level % 5 === 0) next.hero.skillPoints += 1;
+  next.team.roster.forEach((member) => { member.level = Math.max(member.level, next.profile.level); });
   return recalculatePower(next);
 }
 
@@ -206,6 +228,7 @@ export function applyBattleResult(state: GameState, result: BattleResult, now: n
     next.hero.baseHealth += 62;
     next.hero.baseDefense += 3;
     if (next.profile.level % 5 === 0) next.hero.skillPoints += 1;
+    next.team.roster.forEach((member) => { member.level = Math.max(member.level, next.profile.level); });
   }
   next.statistics.wins += 1;
   next.statistics.monstersDefeated += 1;
@@ -214,6 +237,8 @@ export function applyBattleResult(state: GameState, result: BattleResult, now: n
   next.progress.stage += 1;
   next.progress.unlockedZone = Math.min(5, Math.max(next.progress.unlockedZone, Math.ceil(next.progress.stage / 20)));
   if (result.loot) next.equipment.inventory.unshift(result.loot);
+  next.bag.forgeStones += result.victory && next.progress.stage % 5 === 0 ? 2 : result.victory && next.progress.stage % 3 === 0 ? 1 : 0;
+  next.bag.petFood += result.victory && next.progress.stage % 10 === 0 ? 1 : 0;
   next.quests = next.quests.map((quest) => quest.id === "daily-win" ? { ...quest, progress: Math.min(quest.target, quest.progress + 1) } : quest);
   return recalculatePower(next);
 }
@@ -263,6 +288,76 @@ export function forgeEquipment(state: GameState, itemId: string): GameState {
   target.level += 1;
   target.power = Math.floor(target.power * 1.16 + 8);
   next.quests = next.quests.map((quest) => quest.id === "daily-forge" ? { ...quest, progress: Math.min(quest.target, quest.progress + 1) } : quest);
+  return recalculatePower(next);
+}
+
+export function canFreeSummon(state: GameState, now: number) {
+  return state.summon.lastFreeDay !== dayKey(now);
+}
+
+export type SummonBatch = { state: GameState; results: SummonResult[]; error?: "currency" | "count" };
+
+export function summonCompanions(state: GameState, count: 1 | 10, now: number, random = Math.random): SummonBatch {
+  if (count !== 1 && count !== 10) return { state, results: [], error: "count" };
+  const free = count === 1 && canFreeSummon(state, now);
+  const jadeCost = count === 10 ? 1080 : 120;
+  const useKeys = !free && state.currencies.keys >= count;
+  if (!free && !useKeys && state.currencies.jade < jadeCost) return { state, results: [], error: "currency" };
+
+  const next = structuredClone(state);
+  if (free) next.summon.lastFreeDay = dayKey(now);
+  else if (useKeys) next.currencies.keys -= count;
+  else next.currencies.jade -= jadeCost;
+
+  const results: SummonResult[] = [];
+  for (let index = 0; index < count; index += 1) {
+    next.summon.pity += 1;
+    const guaranteedLegendary = next.summon.pity >= 80;
+    const tenGuarantee = count === 10 && index === 9 && !results.some((result) => result.rarity === "epic" || result.rarity === "legendary");
+    const roll = random();
+    const rarity: Rarity = guaranteedLegendary || roll < 0.02 ? "legendary" : tenGuarantee || roll < 0.14 ? "epic" : "rare";
+    if (rarity === "legendary") next.summon.pity = 0;
+    const pool = COMPANION_POOL.filter((member) => member.rarity === rarity);
+    const template = pool[Math.min(pool.length - 1, Math.floor(random() * pool.length))];
+    const existing = next.team.roster.find((member) => member.id === template.id);
+    const shards = rarity === "legendary" ? 40 : rarity === "epic" ? 20 : 10;
+    if (existing) existing.shards += shards;
+    else next.team.roster.push({ ...template, level: next.profile.level, stars: 1, shards: 0 });
+    results.push({ id: template.id, name: template.name, role: template.role, rarity, glyph: template.glyph, isNew: !existing, shards: existing ? shards : 0 });
+  }
+  next.summon.totalPulls += count;
+  next.statistics.summons += count;
+  next.summon.history = [...results.reverse(), ...next.summon.history].slice(0, 30);
+  return { state: recalculatePower(next), results: results.reverse() };
+}
+
+export function setActiveCompanion(state: GameState, companionId: string): GameState {
+  const target = state.team.roster.find((member) => member.id === companionId);
+  if (!target || state.team.activeIds.includes(companionId)) return state;
+  const next = structuredClone(state);
+  const sameRoleIndex = next.team.activeIds.findIndex((id) => next.team.roster.find((member) => member.id === id)?.role === target.role);
+  if (sameRoleIndex >= 0) next.team.activeIds[sameRoleIndex] = companionId;
+  else if (next.team.activeIds.length < 4) next.team.activeIds.push(companionId);
+  else {
+    const weakestIndex = next.team.activeIds.reduce((weakest, id, index, ids) => {
+      const power = companionPower(next.team.roster.find((member) => member.id === id)!);
+      const weakestPower = companionPower(next.team.roster.find((member) => member.id === ids[weakest])!);
+      return power < weakestPower ? index : weakest;
+    }, 0);
+    next.team.activeIds[weakestIndex] = companionId;
+  }
+  return recalculatePower(next);
+}
+
+export function upgradeCompanionStar(state: GameState, companionId: string): GameState {
+  const source = state.team.roster.find((member) => member.id === companionId);
+  if (!source || source.stars >= 6) return state;
+  const cost = source.stars * 20;
+  if (source.shards < cost) return state;
+  const next = structuredClone(state);
+  const target = next.team.roster.find((member) => member.id === companionId)!;
+  target.shards -= cost;
+  target.stars += 1;
   return recalculatePower(next);
 }
 
@@ -332,6 +427,16 @@ export function migrateGameState(input: unknown, now: number, fallbackName = "�
       equipped: { ...fallback.equipment.equipped, ...(raw.equipment?.equipped ?? {}) },
       inventory: Array.isArray(raw.equipment?.inventory) ? raw.equipment!.inventory.slice(0, 250) : fallback.equipment.inventory,
     },
+    team: {
+      activeIds: Array.isArray(raw.team?.activeIds) ? raw.team!.activeIds.slice(0, 4) : fallback.team.activeIds,
+      roster: Array.isArray(raw.team?.roster) ? raw.team!.roster.slice(0, 80) : fallback.team.roster,
+    },
+    summon: {
+      ...fallback.summon,
+      ...(raw.summon ?? {}),
+      history: Array.isArray(raw.summon?.history) ? raw.summon!.history.slice(0, 30) : fallback.summon.history,
+    },
+    bag: { ...fallback.bag, ...(raw.bag ?? {}) },
     progress: { ...fallback.progress, ...(raw.progress ?? {}) },
     idle: { ...fallback.idle, ...(raw.idle ?? {}) },
     quests: Array.isArray(raw.quests) ? raw.quests : fallback.quests,
@@ -350,7 +455,28 @@ export function migrateGameState(input: unknown, now: number, fallbackName = "�
   merged.currencies.gold = clampInt(merged.currencies.gold, 0, 2_000_000_000);
   merged.currencies.jade = clampInt(merged.currencies.jade, 0, 10_000_000);
   merged.currencies.essence = clampInt(merged.currencies.essence, 0, 1_000_000_000);
+  merged.currencies.keys = clampInt(merged.currencies.keys, 0, 1_000_000);
   merged.hero.skillPoints = clampInt(merged.hero.skillPoints, 0, 10_000);
+  merged.summon.pity = clampInt(merged.summon.pity, 0, 79);
+  merged.summon.totalPulls = clampInt(merged.summon.totalPulls, 0, 10_000_000);
+  merged.statistics.summons = clampInt(merged.statistics.summons, 0, 10_000_000);
+  merged.bag.forgeStones = clampInt(merged.bag.forgeStones, 0, 10_000_000);
+  merged.bag.petFood = clampInt(merged.bag.petFood, 0, 10_000_000);
+  merged.bag.skillScrolls = clampInt(merged.bag.skillScrolls, 0, 10_000_000);
+  merged.team.roster = merged.team.roster.filter((member) => member && typeof member.id === "string").map((member) => ({
+    ...member,
+    level: clampInt(member.level, 1, 999),
+    stars: clampInt(member.stars, 1, 6),
+    shards: clampInt(member.shards, 0, 1_000_000),
+    basePower: clampInt(member.basePower, 1, 1_000_000),
+  }));
+  if (merged.team.roster.length < 4) merged.team = fallback.team;
+  const rosterIds = new Set(merged.team.roster.map((member) => member.id));
+  merged.team.activeIds = merged.team.activeIds.filter((id) => rosterIds.has(id)).slice(0, 4);
+  for (const member of merged.team.roster) {
+    if (merged.team.activeIds.length >= 4) break;
+    if (!merged.team.activeIds.includes(member.id)) merged.team.activeIds.push(member.id);
+  }
   return recalculatePower(refreshDaily(merged, now));
 }
 
