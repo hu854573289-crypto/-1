@@ -7,6 +7,7 @@ import {
   idleReward,
   migrateGameState,
   simulateBattle,
+  summonCompanions,
 } from "../lib/game-state";
 import { GAME_SCHEMA_VERSION } from "../lib/game-types";
 
@@ -16,6 +17,9 @@ test("new players receive a playable, internally consistent save", () => {
   assert.equal(state.profile.name, "测试游侠");
   assert.ok(state.profile.power > 0);
   assert.equal(state.equipment.inventory.length, 2);
+  assert.equal(state.team.activeIds.length, 4);
+  assert.equal(state.team.roster.length, 4);
+  assert.equal(state.currencies.keys, 10);
   assert.equal(state.progress.stage, 1);
 });
 
@@ -43,6 +47,8 @@ test("legacy saves migrate without losing player progress", () => {
   assert.equal(migrated.currencies.gold, 98_765);
   assert.equal(migrated.progress.stage, 42);
   assert.ok(migrated.hero.skills.length >= 3);
+  assert.equal(migrated.team.activeIds.length, 4);
+  assert.equal(migrated.schemaVersion, 4);
 });
 
 test("offline rewards are capped and claimed exactly once", () => {
@@ -54,4 +60,14 @@ test("offline rewards are capped and claimed exactly once", () => {
   assert.equal(claimed.idle.lastClaimAt, afterTwoDays);
   assert.ok(claimed.currencies.gold > state.currencies.gold);
   assert.equal(idleReward(claimed, afterTwoDays).seconds, 0);
+});
+
+test("ten-pull summons guarantee epic or better and persist duplicate shards", () => {
+  const state = createDefaultGameState(1_000);
+  const pulled = summonCompanions(state, 10, 2_000, () => 0.5);
+  assert.equal(pulled.results.length, 10);
+  assert.ok(pulled.results.some((result) => result.rarity === "epic" || result.rarity === "legendary"));
+  assert.equal(pulled.state.currencies.keys, 0);
+  assert.equal(pulled.state.statistics.summons, 10);
+  assert.ok(pulled.state.team.roster.some((member) => member.shards > 0));
 });
