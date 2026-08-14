@@ -91,7 +91,7 @@ export function cleanName(value: string) {
 }
 
 export function cleanReason(value: unknown) {
-  const allowed = new Set(["autosave", "background", "idle-claim", "realm-upgrade", "milestone", "manual-restore", "migration", "initial", "conflict-backup", "integrity-recovery"]);
+  const allowed = new Set(["autosave", "background", "idle-claim", "realm-upgrade", "summon", "milestone", "manual-restore", "migration", "initial", "conflict-backup", "integrity-recovery"]);
   const reason = typeof value === "string" ? value.slice(0, 32) : "autosave";
   return allowed.has(reason) ? reason : "autosave";
 }
