@@ -1,0 +1,14 @@
+{
+  "name": "云境远征",
+  "short_name": "云境远征",
+  "description": "东方奇幻放置冒险养成游戏",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#051316",
+  "theme_color": "#07191d",
+  "lang": "zh-CN",
+  "icons": [
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
