@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "云境远征",
-  description: "东方奇幻放置冒险养成游戏：自动战斗、离线挂机、装备与境界成长、云端存档。",
+  description: "东方奇幻四人组队放置冒险：自动推图、离线挂机、伙伴召唤、装备背包与跨设备云存档。",
   applicationName: "云境远征",
   manifest: "/manifest.webmanifest",
   other: { "codex-preview": "development" },
