@@ -1,10 +1,10 @@
 {
   "name": "云境远征",
   "short_name": "云境远征",
-  "description": "东方奇幻放置冒险养成游戏",
+  "description": "四人组队放置冒险、伙伴召唤与跨设备云存档",
   "start_url": "/",
   "display": "standalone",
-  "orientation": "portrait",
+  "orientation": "any",
   "background_color": "#051316",
   "theme_color": "#07191d",
   "lang": "zh-CN",
