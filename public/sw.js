@@ -1,4 +1,4 @@
-const CACHE = "cloudrealm-shell-v3";
+const CACHE = "cloudrealm-shell-v4";
 const SHELL = ["/", "/manifest.webmanifest", "/favicon.svg", "/assets/hero-world.png", "/assets/hero-character.png"];
 
 self.addEventListener("install", (event) => {
