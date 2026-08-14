@@ -1,8 +1,9 @@
-export const GAME_SCHEMA_VERSION = 3;
+export const GAME_SCHEMA_VERSION = 4;
 
-export type GameTab = "home" | "adventure" | "hero" | "bag" | "quests";
+export type GameTab = "home" | "adventure" | "team" | "summon" | "bag";
 export type GearSlot = "weapon" | "armor" | "ring" | "charm";
 export type Rarity = "common" | "rare" | "epic" | "legendary";
+export type CompanionRole = "guardian" | "healer" | "ranger" | "mage";
 
 export type EquipmentItem = {
   id: string;
@@ -34,6 +35,29 @@ export type QuestState = {
   claimed: boolean;
 };
 
+export type CompanionState = {
+  id: string;
+  name: string;
+  role: CompanionRole;
+  rarity: Rarity;
+  level: number;
+  stars: number;
+  basePower: number;
+  shards: number;
+  skillName: string;
+  glyph: string;
+};
+
+export type SummonResult = {
+  id: string;
+  name: string;
+  role: CompanionRole;
+  rarity: Rarity;
+  glyph: string;
+  isNew: boolean;
+  shards: number;
+};
+
 export type GameState = {
   schemaVersion: number;
   profile: {
@@ -63,6 +87,21 @@ export type GameState = {
     equipped: Record<GearSlot, string | null>;
     inventory: EquipmentItem[];
   };
+  team: {
+    activeIds: string[];
+    roster: CompanionState[];
+  };
+  summon: {
+    pity: number;
+    totalPulls: number;
+    lastFreeDay: string;
+    history: SummonResult[];
+  };
+  bag: {
+    forgeStones: number;
+    petFood: number;
+    skillScrolls: number;
+  };
   progress: {
     stage: number;
     bestStage: number;
@@ -87,6 +126,7 @@ export type GameState = {
     monstersDefeated: number;
     goldEarned: number;
     idleSecondsClaimed: number;
+    summons: number;
   };
   settings: {
     music: boolean;
